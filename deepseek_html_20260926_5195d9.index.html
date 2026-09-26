@@ -1,0 +1,896 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no" />
+<meta name="theme-color" content="#0b0f14" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+<meta name="apple-mobile-web-app-title" content="Киев Монитор" />
+<title>Киев Монитор</title>
+
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
+<style>
+  :root {
+    --bg:#0b0f14; --panel:#121821; --panel-2:#1a2230; --border:#22303f;
+    --text:#e6edf3; --muted:#8b98a5; --accent:#ff5a5f; --warn:#ffb020;
+    --ok:#22c55e; --info:#3b82f6;
+  }
+  * { box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+  html, body {
+    margin:0; padding:0; height:100%;
+    background:var(--bg); color:var(--text);
+    font:15px/1.4 -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Roboto, sans-serif;
+    overscroll-behavior-y:contain;
+  }
+  header {
+    position:sticky; top:0; z-index:1000;
+    background:rgba(11,15,20,0.94);
+    -webkit-backdrop-filter:saturate(160%) blur(12px);
+    backdrop-filter:saturate(160%) blur(12px);
+    padding:12px 14px 8px;
+    border-bottom:1px solid var(--border);
+    padding-top:calc(12px + env(safe-area-inset-top));
+  }
+  header h1 { margin:0 0 4px; font-size:16px; }
+  .status { display:flex; align-items:center; gap:8px; font-size:12px; color:var(--muted); }
+  .dot { width:8px; height:8px; border-radius:50%; background:var(--warn); }
+  .dot.live { background:var(--ok); animation:pulse 1.6s infinite; }
+  .dot.off  { background:var(--accent); }
+  @keyframes pulse { 0%,100%{transform:scale(1);opacity:1} 50%{transform:scale(1.4);opacity:.6} }
+
+  nav.tabs { display:flex; gap:6px; margin-top:8px; overflow-x:auto; scrollbar-width:none; }
+  nav.tabs::-webkit-scrollbar { display:none; }
+  nav.tabs button {
+    flex:0 0 auto; background:var(--panel); color:var(--muted);
+    border:1px solid var(--border); border-radius:999px;
+    padding:6px 12px; font-size:13px;
+  }
+  nav.tabs button.active { background:var(--accent); color:#fff; border-color:var(--accent); }
+
+  main { padding:12px 12px 110px; }
+
+  .card {
+    background:var(--panel); border:1px solid var(--border);
+    border-radius:14px; padding:12px 14px; margin-bottom:10px;
+    animation:slide .25s ease-out;
+  }
+  @keyframes slide { from{transform:translateY(6px);opacity:0} to{transform:none;opacity:1} }
+  .card .top { display:flex; justify-content:space-between; font-size:12px; color:var(--muted); margin-bottom:6px; gap:8px; }
+  .card .channel { color:var(--info); font-weight:600; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .card .time { font-variant-numeric:tabular-nums; flex:0 0 auto; }
+  .card .text { font-size:14px; margin:4px 0 8px; word-wrap:break-word; }
+  .tags { display:flex; flex-wrap:wrap; gap:6px; }
+  .tag { font-size:11px; padding:3px 8px; border-radius:999px;
+         background:var(--panel-2); border:1px solid var(--border); color:var(--muted); }
+  .tag.event  { color:#fff; background:var(--accent); border-color:var(--accent); }
+  .tag.weapon { color:#fff; background:var(--warn);   border-color:var(--warn); }
+  .tag.target { color:#fff; background:var(--info);   border-color:var(--info); }
+  .tag.trust  { background:transparent; }
+  .tag.trust.t3 { color:#22c55e; border-color:#22c55e; }
+  .tag.trust.t2 { color:#ffb020; border-color:#ffb020; }
+  .tag.trust.t1 { color:#8b98a5; border-color:#8b98a5; }
+
+  .addr { margin-top:8px; padding:8px 10px; background:var(--panel-2);
+          border-radius:10px; font-size:13px; border:1px dashed var(--border); }
+  .addr b { color:var(--ok); }
+  .mapbtn {
+    margin-top:8px; width:100%; padding:9px;
+    background:var(--panel-2); color:var(--text);
+    border:1px solid var(--border); border-radius:10px;
+    font-size:13px; font-weight:600;
+  }
+
+  .empty { text-align:center; color:var(--muted); padding:40px 16px; font-size:14px; }
+
+  .filters { display:none; padding:12px; background:var(--panel);
+             border:1px solid var(--border); border-radius:14px; margin-bottom:12px; }
+  .filters.open { display:block; }
+  .filters label { display:flex; justify-content:space-between; align-items:center;
+                   padding:8px 0; font-size:14px; border-bottom:1px solid var(--border); }
+  .filters label:last-child { border-bottom:none; }
+  .filters input[type="checkbox"] { transform:scale(1.2); accent-color:var(--accent); }
+
+  footer.bar {
+    position:fixed; left:0; right:0; bottom:0; z-index:1000;
+    display:flex; gap:8px;
+    padding:10px 12px calc(10px + env(safe-area-inset-bottom));
+    background:rgba(11,15,20,0.94);
+    -webkit-backdrop-filter:saturate(160%) blur(12px);
+    backdrop-filter:saturate(160%) blur(12px);
+    border-top:1px solid var(--border);
+  }
+  footer.bar button {
+    flex:1; padding:12px; background:var(--panel-2); color:var(--text);
+    border:1px solid var(--border); border-radius:12px;
+    font-size:14px; font-weight:600;
+  }
+  footer.bar button.primary { background:var(--accent); border-color:var(--accent); color:#fff; }
+
+  .badge { display:inline-block; min-width:20px; text-align:center;
+           background:var(--accent); color:#fff; border-radius:999px;
+           padding:1px 6px; font-size:11px; margin-left:6px; }
+
+  #mapView { position:fixed; inset:0; z-index:2000; background:var(--bg); display:none; flex-direction:column; }
+  #mapView.open { display:flex; }
+  #mapHeader {
+    padding:calc(10px + env(safe-area-inset-top)) 12px 10px;
+    background:rgba(11,15,20,0.96);
+    -webkit-backdrop-filter:saturate(160%) blur(12px);
+    backdrop-filter:saturate(160%) blur(12px);
+    border-bottom:1px solid var(--border);
+    display:flex; gap:10px; align-items:flex-start;
+  }
+  #mapHeader .info { flex:1; font-size:13px; }
+  #mapHeader .title { font-weight:700; margin-bottom:4px; }
+  #mapHeader .sub { color:var(--muted); font-size:12px; }
+  #mapHeader button {
+    background:var(--panel-2); color:var(--text);
+    border:1px solid var(--border); border-radius:10px;
+    padding:8px 12px; font-size:13px;
+  }
+  #map { flex:1; min-height:0; }
+  #mapFooter {
+    padding:10px 12px calc(10px + env(safe-area-inset-bottom));
+    background:rgba(11,15,20,0.96);
+    -webkit-backdrop-filter:saturate(160%) blur(12px);
+    backdrop-filter:saturate(160%) blur(12px);
+    border-top:1px solid var(--border);
+    display:flex; gap:8px;
+  }
+  #mapFooter button {
+    flex:1; padding:12px; background:var(--panel-2); color:var(--text);
+    border:1px solid var(--border); border-radius:12px;
+    font-size:14px; font-weight:600;
+  }
+  #mapFooter button.primary { background:var(--accent); border-color:var(--accent); color:#fff; }
+
+  #poiList {
+    max-height:30vh; overflow-y:auto;
+    padding:8px 12px;
+    background:rgba(11,15,20,0.96);
+    border-top:1px solid var(--border);
+    font-size:13px;
+  }
+  #poiList .poi {
+    display:flex; justify-content:space-between; align-items:center;
+    padding:9px 6px; border-bottom:1px solid var(--border);
+  }
+  #poiList .poi:last-child { border-bottom:none; }
+  #poiList .poi .name { flex:1; }
+  #poiList .poi .dist { color:var(--muted); font-size:12px; margin-left:10px; }
+
+  .leaflet-container { background:#1a2230; }
+  .leaflet-popup-content-wrapper, .leaflet-popup-tip { background:var(--panel); color:var(--text); }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>Киев · Монитор инцидентов</h1>
+  <div class="status">
+    <span id="statusDot" class="dot"></span>
+    <span id="statusText">Подключение…</span>
+    <span id="counter" class="badge">0</span>
+  </div>
+  <nav class="tabs" id="tabs">
+    <button data-tab="all" class="active">Все</button>
+    <button data-tab="взрыв">Взрывы</button>
+    <button data-tab="попадание">Попадания</button>
+    <button data-tab="падение">Падения</button>
+    <button data-tab="пожар">Пожары</button>
+    <button data-tab="weapons">Оружие</button>
+  </nav>
+</header>
+
+<main id="feed">
+  <div class="empty">Загрузка…</div>
+</main>
+
+<div class="filters" id="filters">
+  <label>Жилые дома <input type="checkbox" id="f_residential" /></label>
+  <label>АЗС / заправки <input type="checkbox" id="f_fuel" /></label>
+  <label>ТРЦ / ТЦ <input type="checkbox" id="f_mall" /></label>
+  <label>Маркеты <input type="checkbox" id="f_market" /></label>
+  <label>Инфраструктура <input type="checkbox" id="f_infra" /></label>
+  <label>Больницы / школы <input type="checkbox" id="f_med" /></label>
+</div>
+
+<footer class="bar">
+  <button id="btnFilters">Фильтры</button>
+  <button id="btnRefresh">Обновить</button>
+  <button id="btnSound">🔔 вкл</button>
+</footer>
+
+<section id="mapView">
+  <div id="mapHeader">
+    <div class="info">
+      <div class="title" id="mapTitle">—</div>
+      <div class="sub" id="mapSub">—</div>
+    </div>
+    <button id="btnCloseMap">✕</button>
+  </div>
+  <div id="map"></div>
+  <div id="poiList"></div>
+  <div id="mapFooter">
+    <button id="btnManual">Уточнить вручную</button>
+    <button id="btnConfirm" class="primary">Подтвердить</button>
+  </div>
+</section>
+
+<script>
+/* ============================================================
+   КОНФИГУРАЦИЯ
+   API_URL = null → демо-режим.
+   Если укажете URL (напр. JSON на Cloudflare Worker / gist),
+   приложение будет тянуть оттуда массив инцидентов.
+   ============================================================ */
+const CONFIG = {
+  API_URL: null,
+  REFRESH_MS: 15000,
+  MAX_ITEMS: 400,
+  DEFAULT_ZOOM: 14,
+  OVERPASS_URL: "https://overpass-api.de/api/interpreter",
+};
+
+/* ============================================================
+   КАНАЛЫ + ВЕС ДОВЕРИЯ
+   weight: 3 = официальные/локальные Киев, 2 = региональные, 1 = агрегаторы
+   ============================================================ */
+const CHANNELS = {
+  // Официальные
+  "kpszsu":                 { w:3, cat:"official",   region:"UA" },
+  "UkraineAlarmSignal":     { w:3, cat:"official",   region:"UA" },
+  // Разведка
+  "rozvidkaneba":           { w:3, cat:"intel",      region:"UA" },
+  "Ukrainian_Intelligence": { w:3, cat:"intel",      region:"UA" },
+  // Локальные Киев
+  "dangerousKiev":          { w:3, cat:"local",      region:"Kyiv" },
+  "kyiv_golovne":           { w:3, cat:"local",      region:"Kyiv" },
+  "nebo_raketa":            { w:3, cat:"local",      region:"Kyiv" },
+  // Региональные (ловим Киев, если упомянут)
+  "dnepr_nagladach":        { w:2, cat:"regional",   region:"Dnipro" },
+  "nikalert":               { w:2, cat:"regional",   region:"Dnipro" },
+  "Radar_Dnipra":           { w:2, cat:"regional",   region:"Dnipro" },
+  "shovnebi":               { w:2, cat:"regional",   region:"Dnipro" },
+  "Donetskiy_on":           { w:2, cat:"regional",   region:"Donetsk" },
+  "operatyvnyi_donbas":     { w:2, cat:"regional",   region:"Donetsk" },
+  "eyes_everywhere_ua":     { w:2, cat:"regional",   region:"Zaporizhzhia" },
+  "info_zp":                { w:2, cat:"regional",   region:"Zaporizhzhia" },
+  "operatyvnohlep":         { w:2, cat:"regional",   region:"Zaporizhzhia" },
+  "zaborzp":                { w:2, cat:"regional",   region:"Zaporizhzhia" },
+  "kremen_sv":              { w:2, cat:"regional",   region:"Kirovohrad" },
+  "pivden_FPV":             { w:2, cat:"regional",   region:"Mykolaiv/Kherson" },
+  "korabely_media":         { w:2, cat:"regional",   region:"Mykolaiv" },
+  "odessa_inform":          { w:2, cat:"regional",   region:"Odesa" },
+  "odessa_knight":          { w:2, cat:"regional",   region:"Odesa" },
+  "odessaveter":            { w:2, cat:"regional",   region:"Odesa" },
+  "temporis_odesa":         { w:2, cat:"regional",   region:"Odesa" },
+  "veselyy_pivden":         { w:2, cat:"regional",   region:"Odesa" },
+  "PoltavaRadar":           { w:2, cat:"regional",   region:"Poltava" },
+  "PoltavaRanger":          { w:2, cat:"regional",   region:"Poltava" },
+  "pivden_varta":           { w:2, cat:"regional",   region:"South UA" },
+  "krolevetsnews":          { w:2, cat:"regional",   region:"Sumy" },
+  "rdsprostir":             { w:2, cat:"regional",   region:"Sumy" },
+  "sumygo":                 { w:2, cat:"regional",   region:"Sumy" },
+  "sumyregion":             { w:2, cat:"regional",   region:"Sumy" },
+  "svessainfo":             { w:2, cat:"regional",   region:"Sumy" },
+  "Karkivw":                { w:2, cat:"regional",   region:"Kharkiv" },
+  "kharkivlife":            { w:2, cat:"regional",   region:"Kharkiv" },
+  "kharkov_media":          { w:2, cat:"regional",   region:"Kharkiv" },
+  "kuptg":                  { w:2, cat:"regional",   region:"Kharkiv" },
+  "monitor1654":            { w:2, cat:"regional",   region:"Kharkiv" },
+  "Nablydatel_Dozor":       { w:2, cat:"regional",   region:"Kharkiv" },
+  "place_kharkiv":          { w:2, cat:"regional",   region:"Kharkiv" },
+  "tlknewsua":              { w:2, cat:"regional",   region:"Kharkiv" },
+  "kherson_monitoring":     { w:2, cat:"regional",   region:"Kherson" },
+  "kherson_non_drone":      { w:2, cat:"regional",   region:"Kherson" },
+  "cherkasy_nebbo":         { w:2, cat:"regional",   region:"Cherkasy" },
+  "my_safety_Chernigiv":    { w:2, cat:"regional",   region:"Chernihiv" },
+  "Northern_Sich_ukr":      { w:2, cat:"regional",   region:"Chernihiv" },
+  "PhantomChe":             { w:2, cat:"regional",   region:"Chernihiv" },
+  "RadarChernihiv":         { w:2, cat:"regional",   region:"Chernihiv" },
+  "ShahedChernihiv":        { w:2, cat:"regional",   region:"Chernihiv" },
+  "taktychna_rukavuchkaa":  { w:2, cat:"regional",   region:"Chernihiv" },
+  "mon1tor_ua":             { w:2, cat:"regional",   region:"UA" },
+  "insiderUKR":             { w:2, cat:"regional",   region:"UA" },
+  "oberezhnovibuhi":        { w:2, cat:"regional",   region:"UA" },
+  // Агрегаторы
+  "eRadarrua":              { w:1, cat:"aggregator", region:"UA" },
+  "horizon_of_war_Official":{ w:1, cat:"aggregator", region:"UA" },
+  "JeniokSay":              { w:1, cat:"aggregator", region:"UA" },
+  "kudy_letyt":             { w:1, cat:"aggregator", region:"UA" },
+  "monikppy":               { w:1, cat:"aggregator", region:"UA" },
+  "monitor_ukr":            { w:1, cat:"aggregator", region:"UA" },
+  "newspn":                 { w:1, cat:"aggregator", region:"UA" },
+  "povitryanatrivogaaa":    { w:1, cat:"aggregator", region:"UA" },
+  "radar_raketaa":          { w:1, cat:"aggregator", region:"UA" },
+  "radar_top_ua":           { w:1, cat:"aggregator", region:"UA" },
+  "radarraketppo":          { w:1, cat:"aggregator", region:"UA" },
+  "raketa_trevoga":         { w:1, cat:"aggregator", region:"UA" },
+  "ReniHub":                { w:1, cat:"aggregator", region:"UA" },
+  "sectorv666":             { w:1, cat:"aggregator", region:"UA" },
+  "shahedradar":            { w:1, cat:"aggregator", region:"UA" },
+  "UkraineRadar_24_7":      { w:1, cat:"aggregator", region:"UA" },
+  "ukrainsiypposhnik":      { w:1, cat:"aggregator", region:"UA" },
+  "vanek_nikolaev":         { w:1, cat:"aggregator", region:"UA" },
+  "vibuxaviasia":           { w:1, cat:"aggregator", region:"UA" },
+  "war_monitor":            { w:1, cat:"aggregator", region:"UA" },
+  "zahidnimonitoring":      { w:1, cat:"aggregator", region:"UA" },
+  "geran_gerbera":          { w:1, cat:"aggregator", region:"UA" },
+  "geranium_chronicles":    { w:1, cat:"aggregator", region:"UA" },
+  "milinfolive":            { w:1, cat:"aggregator", region:"UA" },
+  "The_Wrong_Side":         { w:1, cat:"aggregator", region:"UA" },
+};
+
+/* ============================================================
+   ЖЁСТКИЙ ФИЛЬТР ПО КИЕВУ
+   Сообщение проходит, ТОЛЬКО если есть явное упоминание Киева.
+   ============================================================ */
+const KYIV_CORE_RE = /\b(київ|киев|kyiv|києв|києві|киеве|києва|киева|київська|киевская|київщина|киевщина|київськ|киевск)\w*/i;
+
+const KYIV_DISTRICTS_RE = /\b(голосеев|голосіїв|дарниц|деснян|днепровск|дніпровськ|оболон|печерск|печерськ|подольск|подільськ|святошин|соломен|шевченков|шевченків)\w*/i;
+
+const KYIV_MICRO_RE = /\b(сирец|троещин|троєщин|виноградар|виногр|куреневк|куренівк|сырец|нивки|никольск|микольськ|багговут|татарк|лукьянов|лук'янів|зверинец|звіринець|липки|подол|поділ|осокорк|позняк|харьковск|харківськ|березняк|русанівк|радужн|райдужн|воскресенк|мышоловк|мишоловк|корчеватое|корчуват|чапаевк|чапаївк|житемирск|житомирськ|беличи|біличі|новобеличи|новобіличі|академгород|академмістечк|терьомки|терёмки|мотор-?сич)\w*/i;
+
+const KYIV_LANDMARKS_RE = /\b(майдан|хрещатик|крещатик|арсенальн|патон|жулян|теличк|выдубич|видубич|триполь|трипілля|украинк|українк|днепр|дніпро)\b/i;
+
+const KYIV_SATELLITES_RE = /\b(бровар|боярк|буча|бучан|вишгород|вышгород|вишнев|вышнев|иванков|іванків|кагарлык|кагарлик|макаров|мирогощ|обухов|переяслав|славутич|фастов|фастів|белая церковь|біла церква|белоцерков|бородянк|ворзель|гостомель|гостomel|ирпен|ірпінь|коцюбинск|коцюбинськ|лютеж|немешаев|немишаев|петропавловск|погреб|полесск|поліськ|тетиев|тетіїв|чабаны|чабани|юровка|юрівка|яготин)\w*/i;
+
+const KYIV_METRO_RE = /\b(метро|м\.\s?[а-яa-z])/i;
+
+function isKyiv(text) {
+  return KYIV_CORE_RE.test(text)
+      || KYIV_DISTRICTS_RE.test(text)
+      || KYIV_MICRO_RE.test(text)
+      || KYIV_LANDMARKS_RE.test(text)
+      || KYIV_SATELLITES_RE.test(text);
+}
+
+/* ============================================================
+   СОБЫТИЯ / СРЕДСТВА / ОБЪЕКТЫ
+   ============================================================ */
+const EVENTS = {
+  "взрыв":     [/\bвзрыв/i, /\bвибух/i, /\bexplosion/i, /\bвзрывы/i, /\bвибухи/i, /\bгромко\b/i, /\bбахнул/i, /\bхлопок/i, /\bхлопк/i],
+  "детонация": [/\bдетонац/i, /\bдетонаці/i, /\bdetonation/i],
+  "попадание": [/\bпопадан/i, /\bпопад/i, /\bвлучан/i, /\bвлучив/i, /\bприлет/i, /\bприліт/i, /\bприлёт/i, /\bhit\b/i, /\bstrike\b/i, /\bудар\b/i, /\bпоражен/i, /\bуражен/i],
+  "падение":   [/\bпадени/i, /\bпадінн/i, /\bупал/i, /\bвпав/i, /\bобломк/i, /\bуламк/i, /\bсбит/i, /\bзбит/i, /\bdowned\b/i, /\bdebris\b/i],
+  "пожар":     [/\bпожар/i, /\bпожеж/i, /\bгорит\b/i, /\bгоріт/i, /\bвозгоран/i, /\bзайман/i, /\bfire\b/i, /\bburning\b/i, /\bдым\b/i, /\bдим\b/i],
+};
+
+const WEAPONS = {
+  "БПЛА":     [/\bбпла\b/i, /\bдрон/i, /\bдроны/i, /\bдрони/i, /\buav\b/i],
+  "шахед":    [/\bшахед/i, /\bshahed/i, /\bгеран/i, /\bgeran/i],
+  "ракета":   [/\bракет/i, /\bmissile/i, /\bкрылат/i, /\bкрилат/i],
+  "Искандер": [/\bискандер/i, /\biskander/i],
+  "Оникс":    [/\bоникс/i, /\boniks\b/i],
+  "Кинжал":   [/\bкинжал/i, /\bкінжал/i, /\bkinzhal/i],
+  "Калибр":   [/\bкалибр/i, /\bкалібр/i, /\bkalibr/i],
+  "С-300":    [/\bс-?300/i, /\bs-?300\b/i],
+  "баллистика":[/\bбаллист/i, /\bбалістич/i],
+  "МиГ-31К":  [/\bмиг-?31/i, /\bміг-?31/i],
+};
+
+const TARGETS = {
+  "жилой дом": [/\bжилой дом/i, /\bжилой\b/i, /\bжитлов/i, /\bмногоэтаж/i, /\bбагатоповерх/i, /\bмногоквартир/i, /\bбагатоквартир/i, /\bквартир/i, /\bбудинок\b/i],
+  "АЗС / заправка": [/\bазс\b/i, /\bзаправк/i, /\bбензин/i, /\bfuel\b/i, /\bгазозаправ/i],
+  "ТРЦ / ТЦ":  [/\bтрц\b/i, /\bтц\b/i, /\bторгов/i, /\bторговельн/i, /\bмолл\b/i, /\bmall\b/i, /\bторговый центр/i, /\bторговий центр/i],
+  "маркет / супермаркет": [/\bмаркет/i, /\bсупермаркет/i, /\bмагазин/i, /\bгипермаркет/i, /\bгіпермаркет/i, /\bатб\b/i, /\bсильпо/i, /\bсільпо/i, /\bновус/i, /\bnovus/i, /\bфора/i, /\bvarus/i],
+  "инфраструктура": [/\bподстанц/i, /\bпідстанц/i, /\bтэц\b/i, /\bтэс\b/i, /\bкотельн/i, /\bводоканал/i, /\bнасосн/i, /\bзавод\b/i, /\bсклад\b/i, /\bдепо\b/i],
+  "больница / школа": [/\bбольниц/i, /\bлікарн/i, /\bшкол/i, /\bсадик/i, /\bдетсад/i, /\bдитячий садок/i],
+};
+
+function detect(text, dict) {
+  const out = [];
+  for (const [k, arr] of Object.entries(dict)) {
+    if (arr.some(rx => rx.test(text))) out.push(k);
+  }
+  return out;
+}
+
+/* ============================================================
+   АДРЕС
+   ============================================================ */
+const STREET_HOUSE_RX = /(?:ул\.?|улица|вул\.?|вулиця|просп\.?|проспект|пр-?т|бул\.?|бульвар|пер\.?|переулок|пров\.?|провулок|пл\.?|площадь|площа|шоссе|шосе|наб\.?|набережн|набережна|проезд|проїзд)\s*[:\-]?\s*([А-ЯA-ZЇІЄҐа-яa-zїієґ0-9\-\s\.']{3,60}?)\s*[,\s]\s*(\d+[А-Яа-яA-Za-z]?(?:\s*[/\-]\s*\d+[А-Яа-яA-Za-z]?)?)/i;
+const STREET_RX = /(?:ул\.?|улица|вул\.?|вулиця|просп\.?|проспект|пр-?т|бул\.?|бульвар|пер\.?|переулок|пров\.?|провулок|пл\.?|площадь|площа|шоссе|шосе|наб\.?|набережн|набережна|проезд|проїзд)\s*[:\-]?\s*([А-ЯA-ZЇІЄҐа-яa-zїієґ0-9\-\s\.']{3,60})/i;
+const HOUSE_RX = /(?:д\.?|дом|будинок|буд\.?)\s*[:\-]?\s*(\d+[А-Яа-яA-Za-z]?(?:\s*[/\-]\s*\d+[А-Яа-яA-Za-z]?)?)/i;
+const METRO_RX = /(?:метро|м\.)\s*[:\-]?\s*([А-ЯA-ZЇІЄҐа-яa-zїієґ\-\s']{3,40})/i;
+const DISTRICT_RX = /\b(голосеевск|голосіївськ|дарницк|деснянск|днепровск|дніпровськ|оболонск|оболонськ|печерск|печерськ|подольск|подільськ|святошинск|святошинськ|соломенск|солом'янськ|шевченковск|шевченківськ)\w*\s*(?:район|р-н)?/i;
+
+function extractAddress(text) {
+  const addr = { street:null, house:null, metro:null, district:null, raw:null };
+  let m = text.match(STREET_HOUSE_RX);
+  if (m) { addr.street = m[1].trim(); addr.house = m[2].trim(); }
+  else {
+    m = text.match(STREET_RX); if (m) addr.street = m[1].trim();
+    m = text.match(HOUSE_RX);  if (m) addr.house = m[1].trim();
+  }
+  m = text.match(METRO_RX);    if (m) addr.metro = m[1].trim();
+  m = text.match(DISTRICT_RX); if (m) addr.district = m[1].trim();
+  const parts = ["district","street","house","metro"].filter(k => addr[k]).map(k => `${k}: ${addr[k]}`);
+  if (parts.length) addr.raw = parts.join(" | ");
+  return addr;
+}
+
+/* ============================================================
+   ДЕДУПЛИКАЦИЯ
+   ============================================================ */
+const DEDUP_WINDOW_MS = 10 * 60 * 1000;
+function dedupKey(text) {
+  const t = text.replace(/\d{1,2}:\d{2}(:\d{2})?/g, "").replace(/\s+/g, " ").trim().toLowerCase().slice(0, 120);
+  let h = 0; for (let i = 0; i < t.length; i++) h = (h * 31 + t.charCodeAt(i)) | 0;
+  return String(h);
+}
+function isDuplicate(text, seen) {
+  const now = Date.now();
+  for (const k of Object.keys(seen)) if (now - seen[k] > DEDUP_WINDOW_MS) delete seen[k];
+  const k = dedupKey(text);
+  if (seen[k]) return true;
+  seen[k] = now; return false;
+}
+
+/* ============================================================
+   СОСТОЯНИЕ
+   ============================================================ */
+const state = {
+  items: [],
+  tab: "all",
+  sound: true,
+  filters: { residential:false, fuel:false, mall:false, market:false, infra:false, med:false },
+  currentIncident: null,
+  manualMarker: null,
+  poiMarkers: [],
+  manualMode: false,
+  seen: {},
+};
+
+/* ============================================================
+   ДЕМО-ДАННЫЕ (пока нет API)
+   ============================================================ */
+function demoData() {
+  const now = Date.now();
+  return [
+    {
+      ts: new Date(now - 60_000).toISOString(),
+      channel: "nebo_raketa",
+      text: "Сирець. Вже все, влучив (БПЛА) в районі / в перший машинобудівний завод.",
+      events:["попадание"], weapons:["БПЛА"], targets:["инфраструктура"],
+      address:{ street:null, house:null, metro:null, district:null, raw:null },
+    },
+    {
+      ts: new Date(now - 4 * 60_000).toISOString(),
+      channel: "dangerousKiev",
+      text: "Київ, Оболонь. Вибухи. Робота ППО.",
+      events:["взрыв"], weapons:["БПЛА"], targets:[],
+      address:{ street:null, house:null, metro:null, district:null, raw:null },
+    },
+    {
+      ts: new Date(now - 9 * 60_000).toISOString(),
+      channel: "kpszsu",
+      text: "Київська область. Загроза БПЛА. Курс на Київ.",
+      events:[], weapons:["БПЛА"], targets:[],
+      address:{ street:null, house:null, metro:null, district:null, raw:null },
+    },
+  ];
+}
+
+/* ============================================================
+   ХРАНИЛИЩЕ
+   ============================================================ */
+const store = {
+  load() { try { const r = localStorage.getItem("km_items_v2"); if (r) state.items = JSON.parse(r); } catch {} },
+  save() { try { localStorage.setItem("km_items_v2", JSON.stringify(state.items.slice(0, CONFIG.MAX_ITEMS))); } catch {} },
+  merge(incoming) {
+    const seenKeys = new Set(state.items.map(i => (i.channel||"") + "|" + (i.text||"").slice(0,80)));
+    let added = 0;
+    for (const inc of incoming) {
+      const k = (inc.channel||"") + "|" + (inc.text||"").slice(0,80);
+      if (seenKeys.has(k)) continue;
+      seenKeys.add(k); state.items.unshift(inc); added++;
+    }
+    if (state.items.length > CONFIG.MAX_ITEMS) state.items = state.items.slice(0, CONFIG.MAX_ITEMS);
+    if (added) store.save();
+    return added;
+  },
+  saveLocation(itemKey, lat, lon, label) {
+    const idx = state.items.findIndex(i => (i.channel||"") + "|" + (i.text||"").slice(0,80) === itemKey);
+    if (idx < 0) return;
+    state.items[idx].confirmedLocation = { lat, lon, label: label || null, ts: new Date().toISOString() };
+    store.save();
+  },
+};
+
+/* ============================================================
+   ЗВУК
+   ============================================================ */
+let audioCtx = null;
+function beep(kind = "alert") {
+  if (!state.sound) return;
+  try {
+    audioCtx = audioCtx || new (window.AudioContext || window.webkitAudioContext)();
+    const now = audioCtx.currentTime;
+    const o = audioCtx.createOscillator();
+    const g = audioCtx.createGain();
+    o.connect(g); g.connect(audioCtx.destination);
+    if (kind === "alert") {
+      o.type = "sawtooth"; o.frequency.value = 880;
+      g.gain.setValueAtTime(0.001, now);
+      g.gain.exponentialRampToValueAtTime(0.25, now + 0.05);
+      g.gain.exponentialRampToValueAtTime(0.001, now + 0.6);
+      o.start(now); o.stop(now + 0.65);
+      const o2 = audioCtx.createOscillator(); const g2 = audioCtx.createGain();
+      o2.connect(g2); g2.connect(audioCtx.destination);
+      o2.type = "sawtooth"; o2.frequency.value = 660;
+      g2.gain.setValueAtTime(0.001, now + 0.7);
+      g2.gain.exponentialRampToValueAtTime(0.25, now + 0.75);
+      g2.gain.exponentialRampToValueAtTime(0.001, now + 1.3);
+      o2.start(now + 0.7); o2.stop(now + 1.35);
+    } else {
+      o.type = "sine"; o.frequency.value = 520;
+      g.gain.setValueAtTime(0.001, now);
+      g.gain.exponentialRampToValueAtTime(0.15, now + 0.03);
+      g.gain.exponentialRampToValueAtTime(0.001, now + 0.3);
+      o.start(now); o.stop(now + 0.32);
+    }
+    if (navigator.vibrate) navigator.vibrate(kind === "alert" ? [200,80,200] : 60);
+  } catch {}
+}
+
+/* ============================================================
+   ЗАГРУЗКА
+   ============================================================ */
+async function fetchItems() {
+  if (!CONFIG.API_URL) return demoData();
+  const res = await fetch(CONFIG.API_URL, { cache:"no-store" });
+  if (!res.ok) throw new Error("HTTP " + res.status);
+  return await res.json();
+}
+
+/* ============================================================
+   ФИЛЬТРАЦИЯ ЛЕНТЫ
+   ============================================================ */
+function passesFilters(item) {
+  const f = state.filters;
+  const t = (item.targets || []).join(" ").toLowerCase();
+  if (f.residential && !t.includes("жилой")) return false;
+  if (f.fuel && !/азс|заправк|бензин|fuel/.test(t)) return false;
+  if (f.mall && !/трц|тц|торгов|молл|mall/.test(t)) return false;
+  if (f.market && !/маркет|супермаркет|магазин|гипермаркет|атб|сильпо|сільпо|новус|novus|фора|varus/.test(t)) return false;
+  if (f.infra && !/подстанц|підстанц|тэц|тэс|котельн|водоканал|насосн|завод|склад|депо/.test(t)) return false;
+  if (f.med && !/больниц|лікарн|школ|садик|детсад|дитячий садок/.test(t)) return false;
+  const tab = state.tab;
+  if (tab === "all") return true;
+  if (tab === "weapons") return (item.weapons || []).length > 0;
+  const ev = (item.events || []).map(x => x.toLowerCase());
+  return ev.includes(tab.toLowerCase());
+}
+
+/* ============================================================
+   РЕНДЕР
+   ============================================================ */
+function fmtTime(iso) { try { return new Date(iso).toLocaleTimeString("ru-RU", {hour:"2-digit",minute:"2-digit"}); } catch { return ""; } }
+function esc(s) { return (s||"").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c])); }
+function itemKey(item) { return (item.channel||"") + "|" + (item.text||"").slice(0,80); }
+
+function trustLabel(channel) {
+  const c = CHANNELS[channel];
+  if (!c) return { cls:"t1", label:"?" };
+  if (c.w === 3) return { cls:"t3", label:"🟢 " + (c.cat === "official" ? "официально" : c.cat === "local" ? "локальный Киев" : "разведка") };
+  if (c.w === 2) return { cls:"t2", label:"🟡 региональный" };
+  return { cls:"t1", label:"🟠 агрегатор" };
+}
+
+function render() {
+  const feed = document.getElementById("feed");
+  const list = state.items.filter(passesFilters);
+  document.getElementById("counter").textContent = state.items.length;
+
+  if (!list.length) { feed.innerHTML = '<div class="empty">Нет инцидентов под текущий фильтр.</div>'; return; }
+
+  feed.innerHTML = list.map(item => {
+    const tags = [
+      ...(item.events||[]).map(e => `<span class="tag event">${esc(e)}</span>`),
+      ...(item.weapons||[]).map(w => `<span class="tag weapon">${esc(w)}</span>`),
+      ...(item.targets||[]).map(t => `<span class="tag target">${esc(t)}</span>`),
+    ].join("");
+    const tl = trustLabel(item.channel);
+    const trustTag = `<span class="tag trust ${tl.cls}">${esc(tl.label)}</span>`;
+    const addrRaw = item.address?.raw ? `<div class="addr">📍 <b>${esc(item.address.raw)}</b></div>` : "";
+    const confirmed = item.confirmedLocation
+      ? `<div class="addr">✅ <b>Подтверждено:</b> ${item.confirmedLocation.lat.toFixed(5)}, ${item.confirmedLocation.lon.toFixed(5)}</div>`
+      : "";
+    return `
+      <article class="card" data-key="${esc(itemKey(item))}">
+        <div class="top">
+          <span class="channel">@${esc(item.channel||"—")}</span>
+          <span class="time">${fmtTime(item.ts)}</span>
+        </div>
+        <div class="text">${esc(item.text||"")}</div>
+        <div class="tags">${tags}${trustTag}</div>
+        ${addrRaw}
+        ${confirmed}
+        <button class="mapbtn">🗺 Показать на карте</button>
+      </article>
+    `;
+  }).join("");
+
+  document.querySelectorAll(".card .mapbtn").forEach(btn => {
+    btn.addEventListener("click", e => {
+      const key = e.target.closest(".card").dataset.key;
+      const item = state.items.find(i => itemKey(i) === key);
+      if (item) openMap(item);
+    });
+  });
+}
+
+/* ============================================================
+   ОБНОВЛЕНИЕ
+   ============================================================ */
+async function refresh() {
+  const dot = document.getElementById("statusDot");
+  const txt = document.getElementById("statusText");
+  try {
+    const raw = await fetchItems();
+    const incoming = [];
+    for (const item of raw) {
+      if (!item.text) continue;
+      if (!isKyiv(item.text)) continue;               // ЖЁСТКИЙ фильтр по Киеву
+      if (isDuplicate(item.text, state.seen)) continue;
+      incoming.push(item);
+    }
+    const added = store.merge(incoming);
+    if (added) {
+      for (const it of state.items.slice(0, added)) {
+        if ((it.targets||[]).includes("жилой дом") && (it.events||[]).includes("попадание")) {
+          beep("alert"); break;
+        }
+      }
+    }
+    render();
+    dot.className = "dot live";
+    txt.textContent = (CONFIG.API_URL ? "Онлайн" : "Демо") + (added ? ` · +${added}` : "");
+  } catch (e) {
+    dot.className = "dot off"; txt.textContent = "Нет связи";
+  }
+}
+
+/* ============================================================
+   КАРТА
+   ============================================================ */
+let map = null;
+
+function initMap() {
+  if (map) return;
+  map = L.map("map", { zoomControl:true, attributionControl:true }).setView([50.45, 30.52], 12);
+  L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+    maxZoom: 19,
+    attribution: '© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
+  }).addTo(map);
+  map.on("click", e => {
+    if (!state.manualMode) return;
+    setManualMarker(e.latlng.lat, e.latlng.lng);
+  });
+}
+
+function setManualMarker(lat, lon, label) {
+  if (state.manualMarker) map.removeLayer(state.manualMarker);
+  state.manualMarker = L.marker([lat, lon], { draggable:true }).addTo(map)
+    .bindPopup(label || "Ручная метка").openPopup();
+  state.manualMarker.on("dragend", () => {
+    const ll = state.manualMarker.getLatLng();
+    state.manualMarker.setPopupContent(`Ручная метка<br>${ll.lat.toFixed(5)}, ${ll.lng.toFixed(5)}`);
+  });
+}
+
+function clearPoiMarkers() { state.poiMarkers.forEach(m => map.removeLayer(m)); state.poiMarkers = []; }
+
+const MICRODISTRICTS = {
+  "сирець":         { lat:50.4755, lon:30.4370, r:1500 },
+  "сирец":          { lat:50.4755, lon:30.4370, r:1500 },
+  "троещина":       { lat:50.5150, lon:30.6100, r:2500 },
+  "троєщина":       { lat:50.5150, lon:30.6100, r:2500 },
+  "оболонь":        { lat:50.5050, lon:30.4980, r:1800 },
+  "позняки":        { lat:50.4000, lon:30.6300, r:2000 },
+  "осокорки":       { lat:50.3950, lon:30.6100, r:1800 },
+  "осокорк":        { lat:50.3950, lon:30.6100, r:1800 },
+  "харьковский":    { lat:50.4070, lon:30.6680, r:1800 },
+  "печерск":        { lat:50.4300, lon:30.5400, r:1500 },
+  "подол":          { lat:50.4660, lon:30.5170, r:1500 },
+  "поділ":          { lat:50.4660, lon:30.5170, r:1500 },
+  "виноградар":     { lat:50.5070, lon:30.4210, r:1500 },
+  "нивки":          { lat:50.4570, lon:30.4050, r:1500 },
+  "русанівка":      { lat:50.4430, lon:30.5980, r:1200 },
+  "березняки":      { lat:50.4300, lon:30.6020, r:1200 },
+  "дарница":        { lat:50.4500, lon:30.6300, r:2000 },
+  "мышоловка":      { lat:50.3800, lon:30.5050, r:1500 },
+  "голосеево":      { lat:50.3850, lon:30.4900, r:2000 },
+  "тереми":         { lat:50.3680, lon:30.4750, r:1500 },
+  "лукьяновка":     { lat:50.4750, lon:30.4520, r:1200 },
+  "татарка":        { lat:50.4650, lon:30.4600, r:800 },
+  "куреневка":      { lat:50.4950, lon:30.4600, r:1200 },
+  "приорка":        { lat:50.5050, lon:30.4600, r:1200 },
+  "святошин":       { lat:50.4570, lon:30.3650, r:1800 },
+  "беличи":         { lat:50.4650, lon:30.3450, r:1500 },
+  "академгородок":  { lat:50.4650, lon:30.3650, r:1200 },
+};
+
+const POI_TAGS = [
+  { rx:/машинобуд|завод|цех|фабрик/i,
+    q:'node["man_made"="works"](around:%R%,%LAT%,%LON%);way["man_made"="works"](around:%R%,%LAT%,%LON%);node["landuse"="industrial"](around:%R%,%LAT%,%LON%);' },
+  { rx:/трц|тц|торгов|молл|mall/i,
+    q:'node["shop"="mall"](around:%R%,%LAT%,%LON%);way["shop"="mall"](around:%R%,%LAT%,%LON%);' },
+  { rx:/азс|заправк|бензин|fuel/i,
+    q:'node["amenity"="fuel"](around:%R%,%LAT%,%LON%);way["amenity"="fuel"](around:%R%,%LAT%,%LON%);' },
+  { rx:/маркет|супермаркет|магазин|атб|сильпо|сільпо|новус|novus|фора|varus/i,
+    q:'node["shop"="supermarket"](around:%R%,%LAT%,%LON%);way["shop"="supermarket"](around:%R%,%LAT%,%LON%);' },
+  { rx:/лікарн|больниц|hospital/i,
+    q:'node["amenity"="hospital"](around:%R%,%LAT%,%LON%);way["amenity"="hospital"](around:%R%,%LAT%,%LON%);' },
+  { rx:/школ|school/i,
+    q:'node["amenity"="school"](around:%R%,%LAT%,%LON%);way["amenity"="school"](around:%R%,%LAT%,%LON%);' },
+  { rx:/підстанц|подстанц|substation/i,
+    q:'node["power"="substation"](around:%R%,%LAT%,%LON%);way["power"="substation"](around:%R%,%LAT%,%LON%);' },
+  { rx:/тэц|тэс|тец|електростанц/i,
+    q:'node["power"="plant"](around:%R%,%LAT%,%LON%);way["power"="plant"](around:%R%,%LAT%,%LON%);' },
+];
+
+function findMicrodistrict(text) {
+  const t = (text || "").toLowerCase();
+  for (const key of Object.keys(MICRODISTRICTS)) if (t.includes(key)) return { name:key, ...MICRODISTRICTS[key] };
+  return null;
+}
+
+function dist(lat1, lon1, lat2, lon2) {
+  const R=6371000, toRad=x=>x*Math.PI/180;
+  const dLat=toRad(lat2-lat1), dLon=toRad(lon2-lon1);
+  const a=Math.sin(dLat/2)**2 + Math.cos(toRad(lat1))*Math.cos(toRad(lat2))*Math.sin(dLon/2)**2;
+  return 2*R*Math.asin(Math.sqrt(a));
+}
+
+async function fetchPOI(lat, lon, radius, text) {
+  const queries = POI_TAGS.filter(p => p.rx.test(text)).map(p =>
+    p.q.replace(/%R%/g, radius).replace(/%LAT%/g, lat).replace(/%LON%/g, lon));
+  if (!queries.length) return [];
+  const q = `[out:json][timeout:15];(${queries.join("")});out center 30;`;
+  const res = await fetch(CONFIG.OVERPASS_URL + "?data=" + encodeURIComponent(q));
+  if (!res.ok) throw new Error("Overpass HTTP " + res.status);
+  const data = await res.json();
+  const out = [];
+  for (const el of data.elements || []) {
+    const c = el.center || el; if (!c.lat || !c.lon) continue;
+    const name = el.tags?.name || el.tags?.["name:uk"] || el.tags?.["name:ru"] || el.tags?.operator || "Объект OSM";
+    out.push({ lat:c.lat, lon:c.lon, name });
+  }
+  out.sort((a,b) => dist(a.lat,a.lon,lat,lon) - dist(b.lat,b.lon,lat,lon));
+  return out;
+}
+
+async function openMap(item) {
+  state.currentIncident = item;
+  state.manualMode = false;
+  state.manualMarker = null;
+
+  document.getElementById("mapView").classList.add("open");
+  const tl = trustLabel(item.channel);
+  document.getElementById("mapTitle").textContent =
+    `${(item.events||[]).join(" · ") || "событие"} · ${(item.weapons||[]).join(" · ") || "—"}`;
+  document.getElementById("mapSub").textContent = `@${item.channel||"—"} · ${fmtTime(item.ts)} · ${tl.label}`;
+
+  if (!map) initMap();
+  setTimeout(() => map.invalidateSize(), 100);
+
+  const md = findMicrodistrict(item.text);
+  let center = { lat:50.45, lon:30.52 }, radius = 4000;
+  if (md) { center = { lat:md.lat, lon:md.lon }; radius = md.r; }
+  if (item.confirmedLocation) { center = { lat:item.confirmedLocation.lat, lon:item.confirmedLocation.lon }; radius = 800; }
+
+  map.setView([center.lat, center.lon], md ? CONFIG.DEFAULT_ZOOM : 12);
+  clearPoiMarkers();
+
+  if (state.radiusCircle) map.removeLayer(state.radiusCircle);
+  state.radiusCircle = L.circle([center.lat, center.lon], { radius, color:"#ff5a5f", weight:1, fillOpacity:0.08 }).addTo(map);
+
+  const poiList = document.getElementById("poiList");
+  poiList.innerHTML = `<div style="padding:8px 4px;color:var(--muted)">Поиск объектов OSM…</div>`;
+  try {
+    const pois = await fetchPOI(center.lat, center.lon, radius, item.text);
+    if (!pois.length) poiList.innerHTML = `<div style="padding:8px 4px;color:var(--muted)">Объекты не найдены. Уточните вручную.</div>`;
+    else {
+      poiList.innerHTML = pois.slice(0, 12).map(p => `
+        <div class="poi" data-lat="${p.lat}" data-lon="${p.lon}" data-name="${esc(p.name)}">
+          <span class="name">${esc(p.name)}</span>
+          <span class="dist">${Math.round(dist(p.lat,p.lon,center.lat,center.lon))} м</span>
+        </div>`).join("");
+      pois.slice(0, 12).forEach(p => {
+        const m = L.circleMarker([p.lat, p.lon], { radius:6, color:"#ffb020", fillColor:"#ffb020", fillOpacity:0.8, weight:2 })
+          .addTo(map).bindPopup(esc(p.name));
+        state.poiMarkers.push(m);
+      });
+      poiList.querySelectorAll(".poi").forEach(el => {
+        el.addEventListener("click", () => {
+          const lat = parseFloat(el.dataset.lat), lon = parseFloat(el.dataset.lon);
+          map.setView([lat, lon], 16);
+          setManualMarker(lat, lon, el.dataset.name);
+          state.manualMode = true;
+        });
+      });
+    }
+  } catch { poiList.innerHTML = `<div style="padding:8px 4px;color:var(--muted)">Ошибка Overpass. Уточните вручную.</div>`; }
+
+  if (item.confirmedLocation) setManualMarker(item.confirmedLocation.lat, item.confirmedLocation.lon, "подтверждено");
+}
+
+/* ============================================================
+   UI
+   ============================================================ */
+document.getElementById("tabs").addEventListener("click", e => {
+  const btn = e.target.closest("button[data-tab]"); if (!btn) return;
+  [...document.querySelectorAll("#tabs button")].forEach(b => b.classList.remove("active"));
+  btn.classList.add("active"); state.tab = btn.dataset.tab; render();
+});
+document.getElementById("btnFilters").addEventListener("click", () => document.getElementById("filters").classList.toggle("open"));
+document.getElementById("filters").addEventListener("change", e => {
+  const id = e.target.id; if (!id.startsWith("f_")) return;
+  state.filters[id.slice(2)] = e.target.checked; render();
+});
+document.getElementById("btnRefresh").addEventListener("click", () => refresh());
+document.getElementById("btnSound").addEventListener("click", e => {
+  state.sound = !state.sound;
+  e.target.textContent = "🔔 " + (state.sound ? "вкл" : "выкл");
+  if (state.sound) beep("tick");
+});
+document.getElementById("btnCloseMap").addEventListener("click", () => {
+  document.getElementById("mapView").classList.remove("open");
+  state.manualMode = false;
+});
+document.getElementById("btnManual").addEventListener("click", () => {
+  state.manualMode = true;
+  alert("Тапните по карте, чтобы поставить метку. Потом нажмите «Подтвердить».");
+});
+document.getElementById("btnConfirm").addEventListener("click", () => {
+  if (!state.currentIncident || !state.manualMarker) { alert("Сначала поставьте метку на карте."); return; }
+  const ll = state.manualMarker.getLatLng();
+  store.saveLocation(itemKey(state.currentIncident), ll.lat, ll.lng, null);
+  render(); beep("tick");
+  document.getElementById("mapView").classList.remove("open");
+});
+
+/* ============================================================
+   SERVICE WORKER (PWA)
+   ============================================================ */
+if ("serviceWorker" in navigator) {
+  const swCode = `
+    const CACHE="kyiv-monitor-v3";
+    const ASSETS=[
+      "https://unpkg.com/leaflet@1.9.4/dist/leaflet.css",
+      "https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+    ];
+    self.addEventListener("install",e=>{e.waitUntil(caches.open(CACHE).then(c=>c.addAll(ASSETS).catch(()=>{})));self.skipWaiting();});
+    self.addEventListener("activate",e=>e.waitUntil(self.clients.claim()));
+    self.addEventListener("fetch",e=>{
+      const req=e.request; if(req.method!=="GET") return;
+      const url=new URL(req.url);
+      if(url.hostname.endsWith("tile.openstreetmap.org")){
+        e.respondWith(caches.open(CACHE+"-tiles").then(async c=>{
+          const hit=await c.match(req); if(hit) return hit;
+          try{const res=await fetch(req);c.put(req,res.clone());return res;}catch{return hit||Response.error();}
+        })); return;
+      }
+      e.respondWith(fetch(req).catch(()=>caches.match(req)));
+    });
+  `;
+  const blob = new Blob([swCode], { type:"text/javascript" });
+  navigator.serviceWorker.register(URL.createObjectURL(blob)).catch(()=>{});
+}
+
+/* ============================================================
+   СТАРТ
+   ============================================================ */
+store.load();
+render();
+refresh();
+setInterval(refresh, CONFIG.REFRESH_MS);
+</script>
+</body>
+</html>
